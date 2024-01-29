@@ -7,10 +7,12 @@ from denoising_diffusion_pytorch import Unet3D, GaussianDiffusion, Trainer
 from src.utils import *
 
 def main():
-
+    if os.path.exists('./runs/debug'):
+        os.system('rm -r ./runs/debug')
     ### User input ###
     # define run name, if run name already exists and is not 'pretrained', load_model_step must be provided
     run_name = 'pretrained'
+    run_name = 'debug'
 
     if run_name == 'pretrained':
         load_model_step = 200000  # pretrained model was trained for 200k steps
@@ -28,7 +30,7 @@ def main():
     ###
 
     # initialize distributed training
-    dist.init_process_group(backend='gloo')
+    dist.init_process_group(backend='gloo') # Gloo 是 PyTorch 提供的一种基于 TCP/IP 的后端，用于在多个进程之间建立通信通道，以便在分布式设置中进行同步和数据传输
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     ip_kwargs = InitProcessGroupKwargs(timeout=datetime.timedelta(seconds=60*10))  # required to prevent timeout error when nonequal distribution of samplings to GPUs
     accelerator = Accelerator(mixed_precision='fp16', kwargs_handlers=[ddp_kwargs, ip_kwargs], log_with='wandb' if wandb_username is not None else None)
@@ -95,15 +97,17 @@ def main():
 
     trainer = Trainer(
         diffusion,
-        folder = data_dir,
-        validation_folder = data_dir_validation,
-        results_folder = run_dir,
-        selected_channels = config['selected_channels'],
+        folder = data_dir,  # './data/lagrangian/training/'
+        validation_folder = data_dir_validation,   # './data/lagrangian/validation/'
+        results_folder = run_dir,   # './/runs/debug/'
+        selected_channels = config['selected_channels'],   # [0, 1, 3]
         train_batch_size = config['batch_size'],
         test_batch_size = config['batch_size'],
         train_lr = config['learning_rate'],
-        save_and_sample_every = 10000,
-        train_num_steps = 200000,
+        # save_and_sample_every = 10000,
+        # train_num_steps = 200000,
+        save_and_sample_every = 10,
+        train_num_steps = 20,
         ema_decay = 0.995,
         log = True,
         null_cond_prob = 0.1,
