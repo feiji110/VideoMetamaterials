@@ -11,8 +11,8 @@ def main():
         os.system('rm -r ./runs/debug')
     ### User input ###
     # define run name, if run name already exists and is not 'pretrained', load_model_step must be provided
-    run_name = 'pretrained'
-    run_name = 'debug'
+    run_name = 'pretrained' # 文件夹存在，会执行采样生成
+    run_name = 'debug' # 文件夹不存在，会执行训练
 
     if run_name == 'pretrained':
         load_model_step = 200000  # pretrained model was trained for 200k steps

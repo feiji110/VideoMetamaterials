@@ -1060,9 +1060,12 @@ class GaussianDiffusion(nn.Module):
         return loss
 
     def forward(self, x, *args, **kwargs):
+        # 输入参数是x，以及任意数量的位置参数args和关键字参数kwargs
         b, device, img_size, = x.shape[0], x.device, self.image_size
         check_shape(x, 'b c f h w', c = self.channels, f = self.num_frames, h = img_size, w = img_size)
+        # 批量大小、通道数、帧数、高度和宽度
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+        # [0, self.num_timesteps)之间的随机整数，形状为(b,)；.long()方法将张量的数据类型转换为长整型（torch.long或torch.int64）
         x = normalize_img(x)
         return self.p_losses(x, t, *args, **kwargs)
 
@@ -1114,14 +1117,15 @@ def unnormalize_img(t):
 
 def cast_num_frames(t, *, frames):
     f = t.shape[1]
-
+    # 如果当前帧数等于指定的帧数frames，则直接返回输入张量t
     if f == frames:
         return t
-
+    # 如果当前帧数大于指定的帧数frames，则截断输入张量t，只保留前frames个帧
     if f > frames:
         return t[:, :frames]
-
-    return F.pad(t, (0, 0, 0, 0, 0, frames - f)) # (since pad starts from the last dim)
+    # 如果当前帧数小于指定的帧数frames，则在输入张量t末尾填充0，填充的个数为frames-f
+    return F.pad(t, (0, 0, 0, 0, 0, frames - f)) # (since pad starts from the last dim) ???
+    # 第一个参数表示需要填充的张量，第二个参数为一个元组，表示每个维度上需要填充的前后数量 
 
 class Dataset(data.Dataset):
     def __init__(
@@ -1138,16 +1142,16 @@ class Dataset(data.Dataset):
         reference_frame = 'eulerian',
     ):
         super().__init__()
-        self.image_size = image_size
-        self.selected_channels = selected_channels
-        self.num_frames = num_frames
+        self.image_size = image_size # 96
+        self.selected_channels = selected_channels # [0, 1, 3]
+        self.num_frames = num_frames # 11
 
         # load topo data
         topo_folder = folder + 'gifs/topo/'
-        self.paths_top = [p for ext in exts for p in Path(f'{topo_folder}').glob(f'**/*.{ext}')]
+        self.paths_top = [p for ext in exts for p in Path(f'{topo_folder}').glob(f'**/*.{ext}')] # 训练样本数，简化为16
         # sort paths by number of name
         self.paths_top = sorted(self.paths_top, key=lambda x: int(x.name.split('.')[0]))
-        assert all([int(p.stem) == i for i, p in enumerate(self.paths_top)]), 'file position is not equal to index'
+        assert all([int(p.stem) == i for i, p in enumerate(self.paths_top)]), 'file position is not equal to index' #.stem: without its suffix
 
         if reference_frame == 'lagrangian':
             # load u_1 data
@@ -1197,7 +1201,7 @@ class Dataset(data.Dataset):
 
         frame_range_file = folder + 'frame_range_data.csv'
         # we manually apply a 'global-min-max-1'-scaling to the gifs, for which we need the original min/max values
-        self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=','))
+        self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=',')) #(样本数16, 8) 
 
         if reference_frame == 'eulerian':
             self.max_s_mises = torch.max(self.frame_ranges[:,0])
@@ -1227,7 +1231,7 @@ class Dataset(data.Dataset):
             self.min_s_22 = torch.min(self.frame_ranges[:,5])
             self.max_s_22 = torch.max(self.frame_ranges[:,6])
             self.max_strain_energy = torch.max(self.frame_ranges[:,7])
-            self.zero_u_2 = self.normalize(torch.zeros(1), self.min_u_2, self.max_u_2)
+            self.zero_u_2 = self.normalize(torch.zeros(1), self.min_u_2, self.max_u_2) #为啥只是最大值-最小值归一化u_2？
 
             # save min/max values for normalization
             data = [
@@ -1246,31 +1250,33 @@ class Dataset(data.Dataset):
                 writer.writerows(data)
 
         self.cast_num_frames_fn = partial(cast_num_frames, frames = num_frames) if force_num_frames else identity
+        # 如果需要强制改变时间轴的帧数，就用cast_num_frames函数（将第二维数据截断为num_frames），否则就用identity恒等函数
 
         self.transform = T.Compose([
-            T.Resize(image_size),
-            T.RandomHorizontalFlip() if horizontal_flip else T.Lambda(identity),
-            T.CenterCrop(image_size),
-            T.ToTensor()
+            T.Resize(image_size),# 将图像调整为指定的大小image_size
+            T.RandomHorizontalFlip() if horizontal_flip else T.Lambda(identity), # 如果horizontal_flip为True，则图像有50%的概率被水平翻转，否则不进行翻转
+            # T.Lambda(identity)在这里实际上不会对图像进行任何修改，它只是将输入图像原样返回。这可能是为了在转换管道中保持一致的接口，或者为了在将来方便添加其他转换。
+            T.CenterCrop(image_size), # 将图像从中心裁剪为指定的大小image_size
+            T.ToTensor() # 将图像转换为PyTorch张量的格式。这个操作将图像的像素值从0到255的整数转换为0到1之间的浮点数，并将通道顺序从HWC（高度、宽度、通道）转换为CHW（通道、高度、宽度）
         ])
 
         label_file = folder + 'stress_strain_data.csv'
 
-        labels_np = np.genfromtxt(label_file, delimiter=',')
+        labels_np = np.genfromtxt(label_file, delimiter=',') # （样本数，51）
         if per_frame_cond:
             strain = 0.2
             # interpolate stress data to match number of frames
-            given_points = np.linspace(0., strain, num = labels_np.shape[1])
-            eval_points = np.linspace(0., strain, num = num_frames)
+            given_points = np.linspace(0., strain, num = labels_np.shape[1]) # 51个点
+            eval_points = np.linspace(0., strain, num = num_frames) # 11个点
             # overwrite first eval point since we take first frame at 1% strain
-            eval_points[0] = 0.01*strain
-            # interpolate stress data to match number of frames for full array
-            labels_np = np.array([np.interp(eval_points, given_points, labels_np[i,:]) for i in range(labels_np.shape[0])])
-            self.labels = torch.tensor(labels_np).float()
+            eval_points[0] = 0.01*strain # 0-> 0.01 train
+            # interpolate stress data to match number of frames for full array，计算每一个样本，11个点的应力值
+            labels_np = np.array([np.interp(eval_points, given_points, labels_np[i,:]) for i in range(labels_np.shape[0])]) # （样本数，11）
+            self.labels = torch.tensor(labels_np).float() # 转为float32张量
         else:
         # NOTE Remove first label index since only contains zeros, keep in mind that last value of simulation was already removed in preprocessing.
-            self.labels = torch.tensor(labels_np[:,1:]).float()
-        self.detached_labels = self.labels.clone().detach().numpy()
+            self.labels = torch.tensor(labels_np[:,1:]).float() # 通过切片操作labels_np[:,1:]，我们获取了除第一列之外的所有列
+        self.detached_labels = self.labels.clone().detach().numpy() # 使用.clone()方法创建了labels属性的副本，然后使用.detach()方法将其从计算图中分离出来，最后使用.numpy()方法将其转换为NumPy数组。
 
         # compute normalization if not given
         if labels_scaling is None:
@@ -1469,7 +1475,7 @@ class Trainer(object):
         self.ds = Dataset(folder, image_size, labels_scaling = None, selected_channels=self.selected_channels, \
             num_frames = num_frames, per_frame_cond = per_frame_cond, reference_frame=reference_frame)
         self.dl = cycle(self.accelerator.prepare(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True)))
-
+        # 当设置为True时，数据加载器将会在返回之前将数据放在CUDA固定（pinned）内存中固定内存是一种可以被CUDA直接访问的主机内存，它可以加速将数据从CPU复制到GPU的过程。当你有一个大量需要在CPU和GPU之间传输的数据时，使用固定内存可以提高数据传输的速度。
         self.accelerator.print(f'found {len(self.ds)} videos as gif files in {folder}')
         assert len(self.ds) > 0, 'could not find any gif files in folder'
 
@@ -1480,11 +1486,11 @@ class Trainer(object):
 
         self.opt = self.accelerator.prepare(Adam(self.model.parameters(), lr = train_lr))
 
-        self.max_grad_norm = max_grad_norm
+        self.max_grad_norm = max_grad_norm # 
 
-        self.null_cond_prob = null_cond_prob
+        self.null_cond_prob = null_cond_prob # 0.1 
 
-        self.per_frame_cond = per_frame_cond
+        self.per_frame_cond = per_frame_cond # True
 
         self.reset_parameters()
 
@@ -1599,76 +1605,88 @@ class Trainer(object):
         num_preds = 1
     ):
         assert callable(self.log_fn)
-
+        # callable()函数的作用是判断一个对象是否可调用，即判断对象是否是一个函数或者具有__call__方法的对象
         # try to load model trained to given step
-        if load_model_step is not None:
+        if load_model_step is not None: #检查是否需要加载训练到指定步骤的模型
             self.step = load_model_step
             self.load()
 
-        if self.accelerator.is_main_process:
+        if self.accelerator.is_main_process: # 如果是主进程，代码会记录开始时间以进行跟踪
             start_time = time.time() # start timer for tracking purposes
 
         while self.step <= self.train_num_steps:
+            # 如果load_model_step不为None，则会检查load_model_step是否大于等于self.train_num_steps，
+            # 如果是，则跳出循环，因为模型已经训练到了self.train_num_steps
             if load_model_step is not None:
                 if load_model_step >= self.train_num_steps:
                     break  # since model already trained to self.train_num_steps
                 else:
                     self.step += 1  # since we continue from loaded step
             # accumulate context manager (for gradient accumulation)
-            data, cond = next(self.dl)
+            data, cond = next(self.dl) # torch.Size([4, 3, 11, 96, 96]) torch.Size([4, 11])
+            # 获取下一个数据和条件。这里的next()函数用于获取可迭代对象self.dl的下一个元素
             with self.accelerator.accumulate(self.model):
-                self.opt.zero_grad()
+                # 上下文管理器，用于在加速器上累积梯度
+                self.opt.zero_grad() # 梯度置零，以准备计算新的梯度
                 loss = self.model(
                     x = data,
                     cond = cond,
                     null_cond_prob = self.null_cond_prob,
                     prob_focus_present = prob_focus_present,
                     focus_present_mask = focus_present_mask,
-                )
-                self.accelerator.backward(loss)
+                ) # 前向传播，计算损失,一个标量tensor
+                self.accelerator.backward(loss) # 使用加速器计算损失函数对模型参数的梯度
                 # gradient clipping
                 if self.accelerator.sync_gradients and exists(self.max_grad_norm):
+                    # 检查是否需要进行梯度同步，并且检查self.max_grad_norm不是None
                     self.accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                 self.opt.step()
-
+                # 使用优化器更新模型的参数，根据计算得到的梯度进行参数更新。
+        
             self.log_fn({'training loss': loss.item()}, step = self.step)
 
-            if self.step % self.update_ema_every == 0:
+            if self.step % self.update_ema_every == 0: # self.step是否可以被self.update_ema_every整除
                 self.accelerator.wait_for_everyone()
-                self.step_ema()
+                self.step_ema() # 用于执行指数移动平均（Exponential Moving Average，EMA）
 
             if 0 < self.step and self.step % self.save_and_sample_every == 0:
-
+                # 如果self.step大于0且能够被self.save_and_sample_every整除
                 # verify that all processes have the same step (just to be sure)
                 self.accelerator.wait_for_everyone()
+                # 会等待所有进程都执行到这一步，以确保它们都具有相同的step值
                 gathered_steps = self.accelerator.gather(torch.tensor(self.step).to(self.accelerator.device))
+                # 使用self.accelerator.gather()方法收集所有进程的step值，并将其存储在gathered_steps变量中。
                 if gathered_steps.numel() > 1:
                     assert torch.all(gathered_steps == gathered_steps[0])
+                # 用assert语句来确保它们的step值都相等
                 # print current step and total time elapsed in hours, minutes and seconds
                 if self.accelerator.is_main_process:
+                    # 当前进程是主进程，代码会打印当前的step值以及从开始运行到现在所经过的总时间（以小时:分钟:秒形式）
                     cur_time = time.time()
                     elapsed_time = cur_time - start_time
                     elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
+                    # time.gmtime()函数接受一个以秒为单位的时间戳（例如，从1970年1月1日00:00:00 UTC开始的秒数），并返回一个代表该时间的time.struct_time对象。这个对象包含了9个属性：年、月、日、小时、分钟、秒、一周中的第几天、一年中的第几天和夏令时标志。如果没有提供参数，time.gmtime()将返回当前时间。
+                    # time.strftime()函数接受一个格式字符串和一个可选的time.struct_time对象，然后返回一个根据指定格式生成的时间字符串。如果没有提供time.struct_time对象，time.strftime()将使用当前时间。
                     print(f'current step: {self.step}, total time elapsed: {elapsed_time}')
-                # evaluate network on validation set (including Abaqus simulations)
+                # evaluate network on validation set (including Abaqus simulations)在验证集上评估网络的性能
                 self.eval_network(prob_focus_present, focus_present_mask, num_samples = num_samples, num_preds = num_preds)
-                if self.accelerator.is_main_process:
+                if self.accelerator.is_main_process: # 如果当前进程是主进程，代码会计算验证过程所花费的时间，并打印出来
                     elapsed_time_validation = time.time() - cur_time
                     elapsed_time_validation = time.strftime("%H:%M:%S", time.gmtime(elapsed_time_validation))
                     print(f'time elapsed for validation: {elapsed_time_validation}')
             
-            if self.step != self.train_num_steps:
-                self.step += 1
-            elif self.step == self.train_num_steps:       
+            if self.step != self.train_num_steps: # 如果self.step不等于self.train_num_steps
+                self.step += 1 # self.step加1
+            elif self.step == self.train_num_steps: #   如果self.step等于self.train_num_steps      
                 # save model at the end of the training
-                self.accelerator.wait_for_everyone()
-                self.save(step=self.step)
+                self.accelerator.wait_for_everyone() # 等待所有进程都执行到这一步
+                self.save(step=self.step) # 保存模型
                 break
             
-        self.accelerator.print('training completed')
+        self.accelerator.print('training completed') # 训练完成
 
         # end training
-        self.accelerator.end_training()
+        self.accelerator.end_training() # 结束训练
 
     def eval_network(
         self,
@@ -1678,17 +1696,19 @@ class Trainer(object):
         num_samples = 1,
         num_preds = 1
     ):
-
+        # 评估网络模型：计算了模型在测试数据集上的损失，并生成了一些样本视频。这些样本视频被保存到指定的文件夹中，以供进一步分析和评估
         mode = 'training'
 
-        if self.accelerator.is_main_process:
-            # create folder for each milestone
+        if self.accelerator.is_main_process: # 如果当前进程是主进程
+            # create folder for each milestone 动态生成文件夹。如果文件夹已经存在，则不会创建新的文件夹
             os.makedirs('./' + str(self.results_folder) + '/' + mode + '/step_' + str(self.step) + '/gifs', exist_ok=True)
-
-            losses = []
+            # './runs/debug/training/step_10/gifs'
+            losses = [] # 空列表losses，用于存储每个样本的损失值，接下来从验证集中随机选择一些样本作为条件来生成视频
             # select random conditionings from validation set to sample videos
             req_idcs = int(np.ceil(num_samples / self.test_batch_size))
+            # 选择的样本数量由num_samples除以self.test_batch_size向上取整得到
             rand_idcs = np.random.choice(len(self.dl_test), req_idcs, replace=False)
+            # 使用np.random.choice函数从验证集中选择这些样本的索引，并存储在rand_idcs中。
             test_cond_list = []
 
         for idx, (data, cond) in enumerate(self.dl_test):
@@ -1700,39 +1720,49 @@ class Trainer(object):
                 focus_present_mask = focus_present_mask,
             )
             all_losses = self.accelerator.gather_for_metrics(loss)
+            # 使用self.accelerator.gather_for_metrics方法将每个进程的损失值收集起来，并存储在all_losses变量中
             if self.accelerator.is_main_process:
-                if idx in rand_idcs:
-                    test_cond_list.append(cond.clone().detach())
-                loss = torch.mean(all_losses)
-                losses.append(loss.item())
+                if idx in rand_idcs: # 如果idx在rand_idcs中
+                    test_cond_list.append(cond.clone().detach()) # 将cond的副本添加到test_cond_list中
+                loss = torch.mean(all_losses) # 计算平均损失
+                losses.append(loss.item()) # 将损失值添加到losses列表中
 
-        # compute validation loss over full test data
-        test_cond_full_repeated = None
+        # compute validation loss over full test data 计算整个测试数据集的验证损失
+        test_cond_full_repeated = None 
         if self.accelerator.is_main_process:
-            test_loss = np.mean(losses)
+            test_loss = np.mean(losses) # 计算平均损失
             self.log_fn({'validation loss': test_loss}, step = self.step)
+            # 如果当前进程是主进程，将验证损失记录在日志中，使用self.log_fn方法将其写入日志文件，并传递当前的训练步数self.step作为参数
 
             if num_samples > 0:
+                # 如果num_samples大于0，则从随机选择的测试批次中采样num_samples个样本
                 # sample from model conditioned on randomly selected test batch
                 test_cond = torch.cat(test_cond_list, dim=0)[:num_samples,:]
                 # repeat each value of test_cond self.num_samples times
                 test_cond_full_repeated = test_cond.repeat_interleave(num_preds, dim=0)
+                # 将test_cond_list中的条件样本连接起来，并根据num_samples选择前面的样本。
+                # 将每个样本重复num_preds次，得到test_cond_full_repeated。这样做是为了在生成视频时使用不同的条件
 
         self.accelerator.wait_for_everyone()
+        # 等待所有进程完成同步
 
-        # broadcast test_cond_full_repeated across GPUs
+        # broadcast test_cond_full_repeated across GPUs将test_cond_full_repeated广播到所有的GPU上
         test_cond_full_repeated = broadcast_object_list([test_cond_full_repeated])[0].to(self.device)
 
-        if test_cond_full_repeated is not None:
+        if test_cond_full_repeated is not None:# 如果test_cond_full_repeated不为空，则将其分发到可用的GPU上
             # distribute test_cond_full_repeated across available GPUs
             batched_test_cond = self.cond_to_gpu(test_cond_full_repeated)
-            # generate samples using each split of test_cond
-            ema_model = self.accelerator.unwrap_model(self.ema_model)
+            # 使用self.cond_to_gpu方法将test_cond_full_repeated分发到可用的GPU上
+
+            # generate samples using each split of test_cond 使用指导尺度guidance_scale从每个条件中生成样本
+            ema_model = self.accelerator.unwrap_model(self.ema_model) # 将self.ema_model解封装为ema_model
             all_videos_list = []
             for cond in batched_test_cond:
+                # 遍历batched_test_cond中的每个条件，调用ema_model.sample方法来生成样本，并将生成的样本存储在all_videos_list列表中
                 samples = ema_model.sample(cond=cond, guidance_scale = guidance_scale)
                 all_videos_list.append(samples)
-                
+            
+            # 等待所有进程完成同步后，将生成的样本连接成一个单独的张量all_videos_list,然后，再次等待所有进程完成同步
             self.accelerator.wait_for_everyone()
             # concatenate the generated samples into a single tensor
             all_videos_list = torch.cat(all_videos_list, dim = 0)
@@ -1740,15 +1770,20 @@ class Trainer(object):
             # gather all samples from all processes
             self.accelerator.wait_for_everyone()
 
+            # 由于gather方法需要收集相同长度的张量，因此需要对all_videos_list进行填充
             # pad across processes since gather needs tensors of equal length
+            # 使用pad_across_processes方法对all_videos_list进行填充，并将填充后的张量存储在padded_all_videos_list中。
             padded_all_videos_list = self.accelerator.pad_across_processes(all_videos_list, dim=0)          
-            max_length = padded_all_videos_list.shape[0]
+            max_length = padded_all_videos_list.shape[0] # 获取padded_all_videos_list的形状中的最大长度
+
+            # 使用gather方法将填充后的张量收集起来，并将收集到的张量存储在gathered_all_videos_list中
             gathered_all_videos_list = self.accelerator.gather(padded_all_videos_list)
-            # gather the lengths of the original all_videos_list tensors
+            # gather the lengths of the original all_videos_list tensors使用gather方法将原始all_videos_list张量的长度也收集起来
             original_lengths = self.accelerator.gather(torch.tensor(all_videos_list.shape[0]).to(all_videos_list.device))
 
             # do further evaluation on main process
             if self.accelerator.is_main_process:
+                # 如果当前进程是主进程，调用self.save_preds方法来保存生成的样本
                 self.save_preds(gathered_all_videos_list, original_lengths, max_length, num_samples=num_samples, mode=mode)
 
     def eval_target(
@@ -1842,6 +1877,8 @@ class Trainer(object):
             # do further evaluation on main process
             if self.accelerator.is_main_process:
                 self.save_preds(gathered_all_videos_list, original_lengths, max_length, num_samples=num_samples, mode=mode)
+                # 如果当前进程是主进程，调用self.save_preds方法来保存生成的样本。save_preds方法将收集到的所有样本去除填充，并将其存储在gathered_all_videos中。
+                # 然后，将gathered_all_videos进行一些处理，将其重新排列为一个GIF格式的视频，并将其保存到指定的文件夹中
 
 
     def remove_padding(
