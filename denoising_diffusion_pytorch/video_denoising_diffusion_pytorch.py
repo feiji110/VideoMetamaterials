@@ -1078,12 +1078,16 @@ CHANNELS_TO_MODE = {
 }
 
 def seek_all_images(img, channels = 3):
+    # 从给定的图像中提取所有的图像帧
     assert channels in CHANNELS_TO_MODE, f'channels {channels} invalid'
+    # 验证channels参数的有效性。它检查channels是否在CHANNELS_TO_MODE字典中
     mode = CHANNELS_TO_MODE[channels]
-
+    # 将不同的通道数映射到相应的图像模式
     i = 0
     while True:
         try:
+            #使用img.convert(mode)将当前帧转换为指定的图像模式，并使用yield关键字将转换后的图像帧作为生成器的输出
+            # 生成器可以逐个地获取每一帧图像，而不需要一次性加载整个图像序列到内存中。这对于处理大型图像序列或视频非常有用，可以节省内存并提高效率。
             img.seek(i)
             yield img.convert(mode)
         except EOFError:
@@ -1091,12 +1095,24 @@ def seek_all_images(img, channels = 3):
         i += 1
 
 # tensor of shape (channels, frames, height, width) -> gif
-def video_tensor_to_gif(tensor, path, duration = 200, loop = 0, optimize = False):      # NOTE changed optimize to False 
+# 将一个形状为(channels, frames, height, width)的张量转换为GIF图像
+def video_tensor_to_gif(tensor, path, duration = 200, loop = 0, optimize = False):      # NOTE changed optimize to False
+    """
+    tensor：输入的张量，表示视频的像素数据。
+    path：保存生成的GIF图像的路径。
+    duration：每一帧图像在GIF中的显示时间（以毫秒为单位），默认为200毫秒。
+    loop：GIF图像的循环次数，默认为0表示无限循环。
+    optimize：是否对图像进行优化，默认为False
+    """ 
     images = map(T.ToPILImage(), tensor.unbind(dim = 1))
+    # 使用tensor.unbind(dim=1)将输入张量按帧解绑，得到一个帧的迭代器
+    # 然后，使用map(T.ToPILImage(), tensor.unbind(dim=1))将每一帧的张量转换为PIL图像对象，并返回一个图像的迭代器
     # convert images since optimize = False gives issues with non-Palette images
     if optimize == False:
         images = map(lambda img: img.convert('L').convert('P'), images)
+        # 先将其转换为灰度图像（使用img.convert('L')），然后再转换为调色板图像（使用img.convert('P')）。这是因为当optimize为False时，对非调色板图像进行优化会出现问题。
     first_img, *rest_imgs = images
+    # 将第一帧图像保存为GIF图像的第一帧，将剩余的图像作为附加帧
     first_img.save(path, save_all = True, append_images = rest_imgs, duration = duration, loop = loop, optimize = optimize)
     return images
 
@@ -1126,6 +1142,7 @@ def cast_num_frames(t, *, frames):
     # 如果当前帧数小于指定的帧数frames，则在输入张量t末尾填充0，填充的个数为frames-f
     return F.pad(t, (0, 0, 0, 0, 0, frames - f)) # (since pad starts from the last dim) ???
     # 第一个参数表示需要填充的张量，第二个参数为一个元组，表示每个维度上需要填充的前后数量 
+    # 第二个参数的维度为6，依次是批量、通道、帧、高度、宽度？？？？？，可能是原始的视频格式
 
 class Dataset(data.Dataset):
     def __init__(
@@ -1146,7 +1163,7 @@ class Dataset(data.Dataset):
         self.selected_channels = selected_channels # [0, 1, 3]
         self.num_frames = num_frames # 11
 
-        # load topo data
+        # load topo data 1-1. 加载所有场文件路径
         topo_folder = folder + 'gifs/topo/'
         self.paths_top = [p for ext in exts for p in Path(f'{topo_folder}').glob(f'**/*.{ext}')] # 训练样本数，简化为16
         # sort paths by number of name
@@ -1198,11 +1215,11 @@ class Dataset(data.Dataset):
         assert all([int(p.stem) == i for i, p in enumerate(self.paths_ener)]), 'file position is not equal to index'
 
         assert len(self.paths_ener) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
-
+        # 1-2. 加载每一个样本图片0，255边界像素值的真实物理值
         frame_range_file = folder + 'frame_range_data.csv'
         # we manually apply a 'global-min-max-1'-scaling to the gifs, for which we need the original min/max values
-        self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=',')) #(样本数16, 8) 
-
+        self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=',')) #(样本数16, 8) 因为lagrangian，所以8
+        # 1-3. 求取每一列场数据的所有行(即数据集中)的最大最小值，并存储在min_max_values.csv,作用是？？
         if reference_frame == 'eulerian':
             self.max_s_mises = torch.max(self.frame_ranges[:,0])
             self.min_s_22 = torch.min(self.frame_ranges[:,1])
@@ -1248,55 +1265,70 @@ class Dataset(data.Dataset):
             with open(folder + 'min_max_values.csv', 'w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerows(data)
-
-        self.cast_num_frames_fn = partial(cast_num_frames, frames = num_frames) if force_num_frames else identity
+        # 1-4. GIF 图片变换，变换为所需要的帧数，转为张量，取样本时需要用
+        self.cast_num_frames_fn = partial(cast_num_frames, frames = num_frames) if force_num_frames else identity # 取样本最后需要用
+        # partial函数用于创建一个新的函数，它是对cast_num_frames函数的封装，将frames参数固定为num_frames
         # 如果需要强制改变时间轴的帧数，就用cast_num_frames函数（将第二维数据截断为num_frames），否则就用identity恒等函数
 
         self.transform = T.Compose([
             T.Resize(image_size),# 将图像调整为指定的大小image_size
-            T.RandomHorizontalFlip() if horizontal_flip else T.Lambda(identity), # 如果horizontal_flip为True，则图像有50%的概率被水平翻转，否则不进行翻转
+            T.RandomHorizontalFlip() if horizontal_flip else T.Lambda(identity), # 如果horizontal_flip为True，则图像有50%的概率被水平翻转，否则不进行翻转，代码中为False
             # T.Lambda(identity)在这里实际上不会对图像进行任何修改，它只是将输入图像原样返回。这可能是为了在转换管道中保持一致的接口，或者为了在将来方便添加其他转换。
             T.CenterCrop(image_size), # 将图像从中心裁剪为指定的大小image_size
             T.ToTensor() # 将图像转换为PyTorch张量的格式。这个操作将图像的像素值从0到255的整数转换为0到1之间的浮点数，并将通道顺序从HWC（高度、宽度、通道）转换为CHW（通道、高度、宽度）
-        ])
+        ])# 读取GIF图像时需要用
 
+        # 2-1 加载条件：应力应变曲线  51列
         label_file = folder + 'stress_strain_data.csv'
 
         labels_np = np.genfromtxt(label_file, delimiter=',') # （样本数，51）
+        # 2-2 如果要每帧的条件作为输入，每个样本标签为插值获得11个点的应力值；否则，直接取后面50列的应力值
         if per_frame_cond:
             strain = 0.2
             # interpolate stress data to match number of frames
             given_points = np.linspace(0., strain, num = labels_np.shape[1]) # 51个点
             eval_points = np.linspace(0., strain, num = num_frames) # 11个点
             # overwrite first eval point since we take first frame at 1% strain
-            eval_points[0] = 0.01*strain # 0-> 0.01 train
+            eval_points[0] = 0.01*strain # 0-> 0.01*0.2因为在1%应变处采用第一帧
             # interpolate stress data to match number of frames for full array，计算每一个样本，11个点的应力值
             labels_np = np.array([np.interp(eval_points, given_points, labels_np[i,:]) for i in range(labels_np.shape[0])]) # （样本数，11）
+            # 对于每一个样本，使用np.interp函数将应力应变曲线插值为11个点，然后将插值后的结果存储在labels_np中
             self.labels = torch.tensor(labels_np).float() # 转为float32张量
         else:
         # NOTE Remove first label index since only contains zeros, keep in mind that last value of simulation was already removed in preprocessing.
             self.labels = torch.tensor(labels_np[:,1:]).float() # 通过切片操作labels_np[:,1:]，我们获取了除第一列之外的所有列
-        self.detached_labels = self.labels.clone().detach().numpy() # 使用.clone()方法创建了labels属性的副本，然后使用.detach()方法将其从计算图中分离出来，最后使用.numpy()方法将其转换为NumPy数组。
+            # 去除了第一列，因为第一列全为0，这是因为在预处理中，我们已经去除了模拟的最后一个值？？？
 
+        self.detached_labels = self.labels.clone().detach().numpy() 
+        # 使用.clone()方法创建了labels属性的副本，然后使用.detach()方法将其从计算图中分离出来，最后使用.numpy()方法将其转换为NumPy数组，为啥使用clone？
+
+        # 2-3 归一化
         # compute normalization if not given
         if labels_scaling is None:
             # normalize labels to [-1, 1] based on global min/max (i.e., min/max of all samples in training set)
+            # 在这里，我们使用了全局最小/最大值进行归一化，即使用训练集中所有样本的最小/最大值
             self.labels_scaling = Normalization(self.labels, ['continuous']*self.labels.shape[1], 'global-min-max-2')
         else:
             # use given normalization (relevant for validation set, which should use same normalization as training set)
+            # 对于验证集，应该使用与训练集相同的归一化
             self.labels_scaling = labels_scaling
         # apply normalization
         self.labels = self.labels_scaling.normalize(self.labels)
-
+        
+        # 3. 欧拉框架还是拉格朗日框架？用于从路径列表中读取图片
         self.reference_frame = reference_frame
 
     def interpolate(self, tensor, num_frames):
+        # 将输入张量的帧数调整为指定的num_frames，以实现视频插值的效果
         f = tensor.shape[1]
-        if f == num_frames:
+        if f == num_frames: # 检查输入张量的帧数f是否等于num_frames
             return tensor
-        if f > num_frames:
+        if f > num_frames: # 如果f大于num_frames，则截断输入张量，只保留前num_frames个帧
             return tensor[:, :num_frames]
-        return F.interpolate(tensor.unsqueeze(0), num_frames).squeeze(0)
+        return F.interpolate(tensor.unsqueeze(0), num_frames).squeeze(0) # 如果f小于num_frames，则使用F.interpolate函数对输入张量进行插值，将其扩展为num_frames个帧
+    # input：要进行插值的输入张量。size：可选参数，指定插值后的输出大小。scale_factor：可选参数，指定插值的缩放因子。
+    # mode：可选参数，指定插值的模式，默认为'nearest'，即最近邻插值。align_corners：可选参数，指定是否对齐角点，默认为None。
+    # recompute_scale_factor：可选参数，指定是否重新计算缩放因子，默认为None。antialias：可选参数，指定是否进行抗锯齿处理，默认为False。
 
     def normalize(self, arr, min_val, max_val):
         return (arr - min_val) / (max_val - min_val)
@@ -1314,27 +1346,28 @@ class Dataset(data.Dataset):
             paths_s_mises = self.paths_s_mises[index]
             paths_s_22 = self.paths_s_22[index]
             paths_ener = self.paths_ener[index]
-
+            # 读取灰度GIF
             topologies = gif_to_tensor(paths_top, channels=1, transform = self.transform)
-
+            # 依次读取二进制拓扑、von_Mises应力、垂直应力分量、应变能的GIF图像，并将其转换为张量，之后合并为一个张量
             tensor = torch.cat((gif_to_tensor(paths_top, channels=1, transform = self.transform), 
                                 gif_to_tensor(paths_s_mises, channels=1, transform = self.transform),
                                 gif_to_tensor(paths_s_22, channels=1, transform = self.transform),
                                 gif_to_tensor(paths_ener, channels=1, transform = self.transform),
                                 ), dim=0)
             
-            ## convert tensor to [0,1]-normalized global range
-            # unnormalize first
+            ## convert tensor to [0,1]-normalized global range将张量转换为[0,1]范围的全局范围
+            # unnormalize first首先反归一化到真实物理值，对应的每一个样本
             tensor[1,:,:,:] = self.unnorm(tensor[1,:,:,:], 0., self.frame_ranges[index,0])
             tensor[2,:,:,:] = self.unnorm(tensor[2,:,:,:], self.frame_ranges[index,1], self.frame_ranges[index,2])
             tensor[3,:,:,:] = self.unnorm(tensor[3,:,:,:], 0., self.frame_ranges[index,3])
 
-            # set values to zero for all pixels where topology is zero
+            # set values to zero for all pixels where topology is zero设置拓扑为零的所有像素值为零
             # IMPORTANT: we must do this after scaling values true range to ensure a 0 value corresponds to true 0 field value
+            # 注意：我们必须在将值缩放到真实范围之后才能这样做，以确保0值对应于真实的0场值
             for i in range(1,4):
                 tensor[i,:,:,:][topologies[0,:,:,:] == 0.] = 0.
 
-            # normalize to global range
+            # normalize to global range归一化到真实物理值的全局范围，对应的所有样本
             tensor[1,:,:,:] = self.normalize(tensor[1,:,:,:], 0., self.max_s_mises)
             tensor[2,:,:,:] = self.normalize(tensor[2,:,:,:], self.min_s_22, self.max_s_22)
             tensor[3,:,:,:] = self.normalize(tensor[3,:,:,:], 0., self.max_strain_energy)
@@ -1372,33 +1405,38 @@ class Dataset(data.Dataset):
             tensor[2,:,:,:] = self.normalize(tensor[2,:,:,:], 0., self.max_s_mises)
             tensor[3,:,:,:] = self.normalize(tensor[3,:,:,:], self.min_s_22, self.max_s_22)
 
-        # only relevant for ablation study, where we consider two channels (topology and sigma_22)
+        # only relevant for ablation study, where we consider two channels (topology and sigma_22)消融实验只考虑两个通道（二进制拓扑和垂直应力分量sigma_22）
         elif self.reference_frame == 'lagrangian' and self.num_frames == 1:
+            # 1. 根据索引index从self.paths_top、self.paths_s_mises和self.paths_s_22中获取对应的路径
             paths_top = self.paths_top[index]
             paths_s_mises = self.paths_s_mises[index]
             paths_s_22 = self.paths_s_22[index]
-
+            # 2.转换为张量：使用gif_to_tensor函数将路径中的图像转换为张量。这个函数会将图像转换为张量，并可以选择指定通道数和转换方式。
             topologies = gif_to_tensor(paths_top, channels=1, transform = self.transform)
-
+            # 3. 拼接张量：使用torch.cat函数将多个张量沿着指定的维度进行拼接。在这里，将路径中的两个张量拼接在一起，维度为0
             tensor = torch.cat((gif_to_tensor(paths_top, channels=1, transform = self.transform),
                                 gif_to_tensor(paths_s_22, channels=1, transform = self.transform),
                                 ), dim=0)
             
+            # 4. 张量操作：对拼接后的张量进行一系列操作。首先，将第二个通道的张量进行反归一化操作，将其值转换为原始范围内的值。
+            # 然后，将拓扑为零的像素点对应的第二个通道的值设置为零。最后，将第二个通道的张量进行全局归一化操作。
             ## convert tensor to [0,1]-normalized global range
             # unnormalize first
             tensor[1,:,:,:] = self.unnorm(tensor[1,:,:,:], self.frame_ranges[index,5], self.frame_ranges[index,6])
 
             # set values to zero for all pixels where topology is zero
             # IMPORTANT: we must do this after scaling values true range to ensure a 0 value corresponds to true 0 field value
+            # 那之前为啥会在没有材料的地方出现应力？？？
             tensor[1,:,:,:][topologies[0,:,:,:] == 0.] = 0.
 
             # normalize to global range
             tensor[1,:,:,:] = self.normalize(tensor[1,:,:,:], self.min_s_22, self.max_s_22)
 
+            # 5. 设置选定通道：将选定的通道设置为[0, 1]
             self.selected_channels = [0,1]
 
-        tensor = tensor[self.selected_channels,:,:,:]
-        labels = self.labels[index,:]
+        tensor = tensor[self.selected_channels,:,:,:] # 选定场通道的张量[field channel, frames, height, width]
+        labels = self.labels[index,:] # 选定标签的张量[frames, 50 or 11]
 
         return self.cast_num_frames_fn(tensor), labels
 
@@ -1540,7 +1578,11 @@ class Trainer(object):
         self,
         step = None
     ):
-
+        """Save the checkpoint of the trainer.
+            保存模型的状态字典、优化器的状态字典和当前步数、ema模型的状态字典
+        Args:
+            step (int, optional): The step number. Defaults to None.
+        """
         if step == None:
             step = self.step
         save_dir = str(self.results_folder) + '/model/step_' + str(step)
@@ -1549,21 +1591,21 @@ class Trainer(object):
         save_dir = save_dir + '/checkpoint.pt'
 
         self.accelerator.wait_for_everyone()
-
+        # 保存模型的状态字典、优化器的状态字典和当前步数
         save_obj = dict(
             model = self.model.state_dict(),
             optimizer = self.opt.state_dict(),
             steps = self.step,
         )
 
-        if self.ema_model is not None:
+        if self.ema_model is not None: # 如果ema_model不为None，则将其状态字典添加到save_obj中
             save_obj = {**save_obj, 'ema': self.ema_model.state_dict()}
 
         # save to path
         with open(save_dir, 'wb') as f:
             torch.save(save_obj, f)
 
-        self.accelerator.print(f'checkpoint saved to {save_dir}')
+        self.accelerator.print(f'Checkpoint saved to {save_dir}')
 
     def load(
         self,
@@ -1575,19 +1617,20 @@ class Trainer(object):
             raise FileNotFoundError(f'trainer checkpoint not found at {str(path)}. Please check path or run load_model_step = None')
 
         # to avoid extra GPU memory usage in main process when using Accelerate
+        # 为了避免在使用Accelerate时主进程中出现额外的GPU内存使用，使用torch.load函数的map_location参数将模型加载到CPU上
         with open(path, 'rb') as f:
             loaded_obj = torch.load(f, map_location='cpu')
-
+        # 加载模型
         try:
             self.model.load_state_dict(loaded_obj['model'], strict = strict)
         except RuntimeError:
             print("Failed loading state dict.")
-
+        # 加载优化器
         try:
             self.opt.load_state_dict(loaded_obj['optimizer'])
         except:
             self.accelerator.print('resuming with new optimizer')
-
+        # 加载ema模型，ema模型是用于执行指数移动平均（Exponential Moving Average，EMA）的模型，用于在训练过程中跟踪模型的移动平均值？？？？
         try:
             self.ema_model.load_state_dict(loaded_obj['ema'], strict = strict)
         except RuntimeError:
@@ -1792,11 +1835,15 @@ class Trainer(object):
         guidance_scale = 5.,
         num_preds = 1
     ):
+        """在分布式环境中生成目标标签的样本，并保存结果。"""
         self.accelerator.wait_for_everyone()
+        # 使用self.accelerator.wait_for_everyone()来等待所有进程都到达这个点。这是为了确保所有进程都在同一时间开始执行后续的代码
 
         assert callable(self.log_fn)
+        # 使用assert callable(self.log_fn)来断言self.log_fn是一个可调用的函数。如果不是可调用的函数，代码会抛出一个异常
 
         mode = 'eval_target_w_' + str(guidance_scale)
+        # mode变量用于创建文件夹和文件名
 
         test_cond_full_repeated = None
         if self.accelerator.is_main_process:
