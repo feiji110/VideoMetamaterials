@@ -114,21 +114,30 @@ class UnsqueezeLastDim(nn.Module):
         return torch.unsqueeze(x, -1)
 
 class EMA():
+    """EMA代表指数移动平均（Exponential Moving Average）用于更新模型的参数。指数移动平均是一种常用的优化技术，
+    可以平滑参数的更新过程，减少参数的波动。通过使用指数移动平均，模型的参数更新会更加稳定，有助于提高模型的性能和泛化能力。"""
     def __init__(self, beta):
+        """用于设置指数移动平均的衰减因子"""
         super().__init__()
         self.beta = beta
 
     def update_model_average(self, ma_model, current_model):
+        """用于更新模型的移动平均值
+        使用zip函数将current_model(new)和ma_model(old)的参数一一对应起来
+        
+        """
         for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
             old_weight, up_weight = ma_params.data, current_params.data
             ma_params.data = self.update_average(old_weight, up_weight)
 
     def update_average(self, old, new):
+        """更新的方式是将旧的参数值乘以衰减因子beta，然后加上新的参数值乘以(1 - beta)"""
         if old is None:
             return new
         return old * self.beta + (1 - self.beta) * new
 
 class Residual(nn.Module):
+    """残差模块"""
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
@@ -377,9 +386,11 @@ class SpatialLinearAttention(nn.Module):
         out = self.to_out(out)
         return rearrange(out, '(b f) c h w -> b c f h w', b = b)
 
-# attention along space and time
+# attention along space and time在空间和时间上进行注意力操作
 class EinopsToAndFrom(nn.Module):
     def __init__(self, from_einops, to_einops, fn):
+        """rom_einops和to_einops是字符串，用于指定输入和输出的维度排列方式。
+        fn是一个函数，用于对输入进行处理"""
         super().__init__()
         self.from_einops = from_einops
         self.to_einops = to_einops
