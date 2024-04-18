@@ -1874,10 +1874,10 @@ class Trainer(object):
                 return
 
             if len(target_labels.shape) == 1:
-                target_labels = target_labels[np.newaxis,:]
+                target_labels = target_labels[np.newaxis,:] # (11,)---> (1, 11)
 
             if self.per_frame_cond:
-                if self.num_frames != target_labels.shape[1]:
+                if self.num_frames != target_labels.shape[1]:   # 推测为 51个点的形式
                     strain = 0.2
                     # interpolate stress data to match number of frames
                     given_points = np.linspace(0., strain, num = target_labels.shape[1])
@@ -1937,7 +1937,6 @@ class Trainer(object):
                 self.save_preds(gathered_all_videos_list, original_lengths, max_length, num_samples=num_samples, mode=mode)
                 # 如果当前进程是主进程，调用self.save_preds方法来保存生成的样本。save_preds方法将收集到的所有样本去除填充，并将其存储在gathered_all_videos中。
                 # 然后，将gathered_all_videos进行一些处理，将其重新排列为一个GIF格式的视频，并将其保存到指定的文件夹中
-
 
     def remove_padding(
         self,
