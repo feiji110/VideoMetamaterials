@@ -1528,7 +1528,7 @@ class Trainer(object):
         self.accelerator.print(f'found {len(self.ds)} videos as gif files in {folder}')
         assert len(self.ds) > 0, 'could not find any gif files in folder'
 
-        # create test set, use same normalization as for training set, i.e., same frame range and label scaling
+        # create test set, use same normalization as for training set, i.e., same frame range and label scaling # 用训练集的归一化参数创建测试集
         self.ds_test = Dataset(validation_folder, image_size, labels_scaling=self.ds.labels_scaling, \
             selected_channels=self.selected_channels, num_frames = num_frames, per_frame_cond = per_frame_cond, reference_frame=reference_frame)
         self.dl_test = self.accelerator.prepare(data.DataLoader(self.ds_test, batch_size = self.test_batch_size, shuffle=False, pin_memory=True))
