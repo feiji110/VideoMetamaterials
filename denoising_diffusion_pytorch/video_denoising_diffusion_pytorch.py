@@ -1181,7 +1181,7 @@ class Dataset(data.Dataset):
         self.paths_top = sorted(self.paths_top, key=lambda x: int(x.name.split('.')[0]))
         assert all([int(p.stem) == i for i, p in enumerate(self.paths_top)]), 'file position is not equal to index' #.stem: without its suffix
 
-        if reference_frame == 'lagrangian':
+        if reference_frame == 'lagrangian' or reference_frame == 'voronoi':
             # load u_1 data
             u_1_folder = folder + 'gifs/u_1/'
             self.paths_u_1 = [p for ext in exts for p in Path(f'{u_1_folder}').glob(f'**/*.{ext}')]
@@ -1199,15 +1199,25 @@ class Dataset(data.Dataset):
             assert all([int(p.stem) == i for i, p in enumerate(self.paths_u_2)]), 'file position is not equal to index'
             
             assert len(self.paths_u_2) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
-                
-        # load mises data
-        s_mises_folder = folder + 'gifs/s_mises/'
-        self.paths_s_mises = [p for ext in exts for p in Path(f'{s_mises_folder}').glob(f'**/*.{ext}')]
-        # sort paths by number of name
-        self.paths_s_mises = sorted(self.paths_s_mises, key=lambda x: int(x.name.split('.')[0]))
-        assert all([int(p.stem) == i for i, p in enumerate(self.paths_s_mises)]), 'file position is not equal to index'
+        if reference_frame != 'voronoi':    
+            # load mises data
+            s_mises_folder = folder + 'gifs/s_mises/'
+            self.paths_s_mises = [p for ext in exts for p in Path(f'{s_mises_folder}').glob(f'**/*.{ext}')]
+            # sort paths by number of name
+            self.paths_s_mises = sorted(self.paths_s_mises, key=lambda x: int(x.name.split('.')[0]))
+            assert all([int(p.stem) == i for i, p in enumerate(self.paths_s_mises)]), 'file position is not equal to index'
 
-        assert len(self.paths_s_mises) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
+            assert len(self.paths_s_mises) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
+
+            # load ener data
+            ener_folder = folder + 'gifs/ener/'
+            self.paths_ener = [p for ext in exts for p in Path(f'{ener_folder}').glob(f'**/*.{ext}')]
+            # sort paths by number of name
+            self.paths_ener = sorted(self.paths_ener, key=lambda x: int(x.name.split('.')[0]))
+            assert all([int(p.stem) == i for i, p in enumerate(self.paths_ener)]), 'file position is not equal to index'
+
+            assert len(self.paths_ener) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
+
 
         # load s_22 data
         s_22_folder = folder + 'gifs/s_22/'
@@ -1218,19 +1228,21 @@ class Dataset(data.Dataset):
 
         assert len(self.paths_s_22) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
 
-        # load ener data
-        ener_folder = folder + 'gifs/ener/'
-        self.paths_ener = [p for ext in exts for p in Path(f'{ener_folder}').glob(f'**/*.{ext}')]
-        # sort paths by number of name
-        self.paths_ener = sorted(self.paths_ener, key=lambda x: int(x.name.split('.')[0]))
-        assert all([int(p.stem) == i for i, p in enumerate(self.paths_ener)]), 'file position is not equal to index'
+        if reference_frame == 'voronoi':
 
-        assert len(self.paths_ener) == len(self.paths_top), 'number of files in fields and top folders are not equal.'
-        # 1-2. 加载每一个样本图片0，255边界像素值的真实物理值
-        frame_range_file = folder + 'frame_range_data.csv'
-        # we manually apply a 'global-min-max-1'-scaling to the gifs, for which we need the original min/max values
-        self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=',')) #(样本数16, 8) 因为lagrangian，所以8
-        # 1-3. 求取每一列场数据的所有行(即数据集中)的最大最小值，并存储在min_max_values.csv,作用是？？
+            frame_range_file = folder + 'lag_frame_ranges.csv'
+
+            self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=',',skip_header=1))# （样本数，51）
+        else:
+
+            # 1-2. 加载每一个样本图片0，255边界像素值的真实物理值
+            frame_range_file = folder + 'frame_range_data.csv'
+            # we manually apply a 'global-min-max-1'-scaling to the gifs, for which we need the original min/max values
+            self.frame_ranges = torch.tensor(np.genfromtxt(frame_range_file, delimiter=',')) #(样本数16, 8) 因为lagrangian，所以8
+            # 1-3. 求取每一列场数据的所有行(即数据集中)的最大最小值，并存储在min_max_values.csv,作用是？？
+
+
+
         if reference_frame == 'eulerian':
             self.max_s_mises = torch.max(self.frame_ranges[:,0])
             self.min_s_22 = torch.min(self.frame_ranges[:,1])
@@ -1276,6 +1288,29 @@ class Dataset(data.Dataset):
             with open(folder + 'min_max_values.csv', 'w', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerows(data)
+        elif reference_frame == 'voronoi':
+            self.min_u_1 = torch.min(self.frame_ranges[:,0])
+            self.max_u_1 = torch.max(self.frame_ranges[:,1])
+            self.min_u_2 = torch.min(self.frame_ranges[:,2])
+            self.max_u_2 = torch.max(self.frame_ranges[:,3])
+            self.min_s_22 = torch.max(self.frame_ranges[:,4])
+            self.max_s_22 = torch.min(self.frame_ranges[:,5])
+            self.zero_u_2 = self.normalize(torch.zeros(1), self.min_u_2, self.max_u_2) #为啥只是最大值-最小值归一化u_2？
+
+            # save min/max values for normalization
+            data = [
+                ['min_u_1', self.min_u_1.item()],
+                ['max_u_1', self.max_u_1.item()],
+                ['min_u_2', self.min_u_2.item()],
+                ['max_u_2', self.max_u_2.item()],
+                ['min_s_22', self.min_s_22.item()],
+                ['max_s_22', self.max_s_22.item()],
+            ]
+
+            with open(folder + 'min_max_values.csv', 'w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerows(data)
+        
         # 1-4. GIF 图片变换，变换为所需要的帧数，转为张量，取样本时需要用
         self.cast_num_frames_fn = partial(cast_num_frames, frames = num_frames) if force_num_frames else identity # 取样本最后需要用
         # partial函数用于创建一个新的函数，它是对cast_num_frames函数的封装，将frames参数固定为num_frames
@@ -1445,6 +1480,36 @@ class Dataset(data.Dataset):
 
             # 5. 设置选定通道：将选定的通道设置为[0, 1]
             self.selected_channels = [0,1]
+
+        elif self.reference_frame == 'voronoi' and self.num_frames != 1:
+            paths_top = self.paths_top[index]
+            paths_u_1 = self.paths_u_1[index]
+            paths_u_2 = self.paths_u_2[index]
+
+            paths_s_22 = self.paths_s_22[index]
+
+            topologies = gif_to_tensor(paths_top, channels=1, transform = self.transform)
+
+            tensor = torch.cat((gif_to_tensor(paths_u_1, channels=1, transform = self.transform), 
+                                gif_to_tensor(paths_u_2, channels=1, transform = self.transform),
+                                gif_to_tensor(paths_s_22, channels=1, transform = self.transform),
+                                ), dim=0)
+            
+            ## convert tensor to [0,1]-normalized global range
+            # unnormalize first
+            tensor[0,:,:,:] = self.unnorm(tensor[0,:,:,:], self.frame_ranges[index,0], self.frame_ranges[index,1])
+            tensor[1,:,:,:] = self.unnorm(tensor[1,:,:,:], self.frame_ranges[index,2], self.frame_ranges[index,3])
+            tensor[2,:,:,:] = self.unnorm(tensor[2,:,:,:], self.frame_ranges[index,4], self.frame_ranges[index,5])
+
+            # set values to zero for all pixels where topology is zero
+            # IMPORTANT: we must do this after scaling values true range to ensure a 0 value corresponds to true 0 field value
+            for i in range(3):
+                tensor[i,:,:,:][topologies.repeat(1,11,1,1)[0,:,:,:]== 0.] = 0.
+
+            # normalize to global range
+            tensor[0,:,:,:] = self.normalize(tensor[0,:,:,:], self.min_u_1, self.max_u_1)
+            tensor[1,:,:,:] = self.normalize(tensor[1,:,:,:], self.min_u_2, self.max_u_2)
+            tensor[2,:,:,:] = self.normalize(tensor[2,:,:,:], self.min_s_22, self.max_s_22)
 
         tensor = tensor[self.selected_channels,:,:,:] # 选定场通道的张量[field channel, frames, height, width]
         labels = self.labels[index,:] # 选定标签的张量[frames, 50 or 11]
@@ -1875,10 +1940,10 @@ class Trainer(object):
                 return
 
             if len(target_labels.shape) == 1:
-                target_labels = target_labels[np.newaxis,:]
+                target_labels = target_labels[np.newaxis,:] # (11,)---> (1, 11)
 
             if self.per_frame_cond:
-                if self.num_frames != target_labels.shape[1]:
+                if self.num_frames != target_labels.shape[1]:   # 推测为 51个点的形式
                     strain = 0.2
                     # interpolate stress data to match number of frames
                     given_points = np.linspace(0., strain, num = target_labels.shape[1])
@@ -1939,7 +2004,6 @@ class Trainer(object):
                 # 如果当前进程是主进程，调用self.save_preds方法来保存生成的样本。save_preds方法将收集到的所有样本去除填充，并将其存储在gathered_all_videos中。
                 # 然后，将gathered_all_videos进行一些处理，将其重新排列为一个GIF格式的视频，并将其保存到指定的文件夹中
 
-
     def remove_padding(
         self,
         gathered_all_videos_list,
@@ -1990,7 +2054,7 @@ class Trainer(object):
             gathered_all_videos_red = gathered_all_videos[:,:,:,pixels//2:,:pixels//2].detach().clone()
             # extract the first frame and channel of each video as topology, 
             topologies = gathered_all_videos_red[:,0,0,:,:]
-        elif self.reference_frame == 'lagrangian':
+        elif self.reference_frame == 'lagrangian' or self.reference_frame == 'voronoi':
             # extract upper left quarter since we evaluate disp_y, which will be nonzero there
             gathered_all_videos_red = gathered_all_videos[:,:,:,:pixels//2,:pixels//2].detach().clone()
             # mirror the tensor along the x-axis of pixels

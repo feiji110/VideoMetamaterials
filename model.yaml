@@ -4,12 +4,15 @@ learning_rate: 1.e-4
 selected_channels: # select channels to consider: 0 - u_1, 1 - u_2, 2 - \sigma_{von Mises}, 3 - \sigma_{22} for Lagrangian reference frame
 - 0
 - 1
-- 3
+- 2
 train_timesteps: 256
 sampling_timesteps: 256 # DDIM (https://arxiv.org/abs/2010.02502) is applied if sampling_timesteps < train_timesteps
 use_dynamic_thres: true
 # architecture configuration
-reference_frame: 'lagrangian' # 'lagrangian', 'eulerian'
+reference_frame: 'voronoi' # 'lagrangian', 'eulerian'
+image_size: 128
+# reference_frame: 'lagrangian' # 'lagrangian', 'eulerian'
+# image_size: 96
 padding_mode: 'zeros' # 'zeros', 'circular_1d', 'circular'
 unet_dim: 64 
 unet_attn_dim_head: 32
