@@ -12,9 +12,9 @@ def main():
     ### User input ###
     # define run name, if run name already exists and is not 'pretrained', load_model_step must be provided
     run_name = 'pretrained' # 文件夹存在，会执行采样生成
-    run_name = 'debug' # 文件夹不存在，会执行训练
-
-    if run_name == 'pretrained':
+    # run_name = 'debug-128' # 文件夹不存在，会执行训练
+    run_name = 'debug'
+    if run_name == 'pretrained'or run_name == 'debug-128':
         load_model_step = 200000  # pretrained model was trained for 200k steps
     else:
         load_model_step = None  # train new model (or change this in case you want to load your own pretrained model)
@@ -37,7 +37,7 @@ def main():
 
     # store data in given directory
     cur_dir = './'  # local path to repo
-    run_dir = cur_dir + '/runs/' + run_name + '/'
+    run_dir = cur_dir + 'runs/' + run_name + '/'
 
     # path to target stress-strain curves
     target_labels_dir = cur_dir + 'data/target_responses.csv'
@@ -83,7 +83,7 @@ def main():
 
     diffusion = GaussianDiffusion(
         model,
-        image_size = 96,
+        image_size = config['image_size'],
         channels = len(config['selected_channels']),
         num_frames = 11,
         timesteps = config['train_timesteps'],
