@@ -1493,6 +1493,7 @@ class Dataset(data.Dataset):
             tensor = torch.cat((gif_to_tensor(paths_u_1, channels=1, transform = self.transform), 
                                 gif_to_tensor(paths_u_2, channels=1, transform = self.transform),
                                 gif_to_tensor(paths_s_22, channels=1, transform = self.transform),
+                                topologies
                                 ), dim=0)
             
             ## convert tensor to [0,1]-normalized global range
@@ -1504,7 +1505,9 @@ class Dataset(data.Dataset):
             # set values to zero for all pixels where topology is zero
             # IMPORTANT: we must do this after scaling values true range to ensure a 0 value corresponds to true 0 field value
             for i in range(3):
-                tensor[i,:,:,:][topologies.repeat(1,11,1,1)[0,:,:,:]== 0.] = 0.
+                # tensor[i,:,:,:][topologies.repeat(1,11,1,1)[0,:,:,:]== 0.] = 0.
+                tensor[i,:,:,:][topologies[0,:,:,:]== 0.] = 0.
+                
 
             # normalize to global range
             tensor[0,:,:,:] = self.normalize(tensor[0,:,:,:], self.min_u_1, self.max_u_1)
@@ -1548,12 +1551,16 @@ class Trainer(object):
         self.accelerator = accelerator
 
         if log:
+            import datetime
+            current_time = datetime.datetime.now()
             self.accelerator.init_trackers(
                 project_name='metamaterial_diffusion',
                 init_kwargs={
                     'wandb': {
-                        'name': run_name,
-                        'entity': wandb_username,
+                        # 'name': '2024-03-29',
+                        'name': current_time.strftime("%Y-%m-%d %H:%M:%S"),
+
+                        'entity': "19831122880",
                     }
                 },
             )
